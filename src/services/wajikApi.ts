@@ -1,5 +1,5 @@
-const BASE_URL = 'https://wajik-api.onrender.com';
-const PROXY_BASE_URL = 'https://wajik-api.onrender.com';
+const BASE_URL = 'http://localhost:3001';
+const PROXY_BASE_URL = 'http://localhost:3001';
 
 export async function searchAnime(query: string) {
   // Sanitize query by removing special characters except letters, numbers, spaces, and common punctuation
