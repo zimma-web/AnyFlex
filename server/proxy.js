@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const app = express();
 const PORT = 3001;
@@ -11,71 +10,61 @@ app.use(cors({
   credentials: true
 }));
 
+// Parse JSON bodies
+app.use(express.json());
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Proxy server is running' });
 });
 
-// Proxy configuration for different anime sources
-const proxyOptions = {
-  target: 'https://otakudesu.cloud',
-  changeOrigin: true,
-  secure: true,
-  followRedirects: true,
-  timeout: 30000,
-  onError: (err, req, res) => {
-    console.error('Proxy error:', err.message);
-    res.status(500).json({
-      statusCode: 500,
-      statusMessage: 'Proxy Error',
-      message: 'Failed to fetch data from source',
-      ok: false,
-      error: err.message
-    });
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    console.log(`Proxying request: ${req.method} ${req.url}`);
-    // Set proper headers
-    proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
-    proxyReq.setHeader('Accept-Language', 'en-US,en;q=0.5');
-    proxyReq.setHeader('Accept-Encoding', 'gzip, deflate');
-    proxyReq.setHeader('Connection', 'keep-alive');
-  },
-  onProxyRes: (proxyRes, req, res) => {
-    console.log(`Proxy response: ${proxyRes.statusCode} for ${req.url}`);
-  }
-};
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    statusCode: 200,
+    statusMessage: 'OK',
+    message: 'Anime API Proxy Server',
+    ok: true,
+    endpoints: [
+      '/otakudesu/search?q=query',
+      '/otakudesu/anime/:id',
+      '/otakudesu/episode/:id',
+      '/otakudesu/server/:id'
+    ]
+  });
+});
 
-// Mock API endpoints since we don't have the actual wajik-anime-api running
+// Mock API endpoints for otakudesu
 app.get('/otakudesu/search', async (req, res) => {
   try {
     const query = req.query.q;
     console.log('Search query:', query);
     
-    // Mock search response
-    const mockSearchResults = {
-      statusCode: 200,
-      statusMessage: 'OK',
-      message: 'Search results',
-      ok: true,
-      data: {
-        animeList: [
-          {
-            title: query || 'Sample Anime',
-            poster: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
-            episodes: 12,
-            releaseDay: 'Friday',
-            latestReleaseDate: '01 Jan',
-            animeId: 'sample-anime-id',
-            href: '/otakudesu/anime/sample-anime-id/',
-            otakudesuUrl: 'https://otakudesu.cloud/anime/sample-anime-id/'
-          }
-        ]
+    // Mock search response that matches the expected format
+    const mockSearchResults = [
+      {
+        title: query || 'Sample Anime',
+        poster: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
+        episodes: 12,
+        releaseDay: 'Friday',
+        latestReleaseDate: '01 Jan',
+        animeId: 'sample-anime-id',
+        href: '/otakudesu/anime/sample-anime-id/',
+        otakudesuUrl: 'https://otakudesu.cloud/anime/sample-anime-id/'
+      },
+      {
+        title: `${query} Season 2` || 'Sample Anime Season 2',
+        poster: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
+        episodes: 24,
+        releaseDay: 'Saturday',
+        latestReleaseDate: '15 Jan',
+        animeId: 'sample-anime-s2-id',
+        href: '/otakudesu/anime/sample-anime-s2-id/',
+        otakudesuUrl: 'https://otakudesu.cloud/anime/sample-anime-s2-id/'
       }
-    };
+    ];
     
-    res.json(mockSearchResults.data.animeList);
+    res.json(mockSearchResults);
   } catch (error) {
     console.error('Search error:', error);
     res.status(500).json({
@@ -102,17 +91,24 @@ app.get('/otakudesu/anime/:id', async (req, res) => {
       data: {
         title: 'Sample Anime',
         poster: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
-        synopsis: 'This is a sample anime description for testing purposes.',
+        synopsis: 'This is a sample anime description for testing purposes. Follow the adventures of our heroes as they embark on an epic journey.',
         status: 'Completed',
         episodes: Array.from({ length: 12 }, (_, i) => ({
           id: `episode-${i + 1}`,
-          episodeId: `ep-${i + 1}`,
+          episodeId: `ep-${animeId}-${i + 1}`,
           title: `Episode ${i + 1}`,
-          number: i + 1
+          number: i + 1,
+          href: `/otakudesu/episode/ep-${animeId}-${i + 1}/`
         })),
         genres: ['Action', 'Adventure', 'Drama'],
         score: 8.5,
-        mal_id: parseInt(animeId) || 1
+        mal_id: parseInt(animeId) || 1,
+        images: {
+          jpg: {
+            image_url: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
+            large_image_url: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=600&h=900&fit=crop'
+          }
+        }
       }
     };
     
@@ -144,7 +140,8 @@ app.get('/otakudesu/episode/:id', async (req, res) => {
         title: `Episode ${episodeId}`,
         serverId: `server-${episodeId}`,
         servers: [
-          { id: `server-${episodeId}`, name: 'Server 1' }
+          { id: `server-${episodeId}`, name: 'Server 1', quality: '720p' },
+          { id: `server-${episodeId}-hd`, name: 'Server 2', quality: '1080p' }
         ]
       }
     };
@@ -176,7 +173,8 @@ app.get('/otakudesu/server/:id', async (req, res) => {
       data: {
         url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
         quality: '720p',
-        server: serverId
+        server: serverId,
+        type: 'mp4'
       }
     };
     
@@ -193,17 +191,73 @@ app.get('/otakudesu/server/:id', async (req, res) => {
   }
 });
 
-// Fallback for other routes
+// Additional endpoints for other sources (samehadaku)
+app.get('/samehadaku/search', async (req, res) => {
+  try {
+    const query = req.query.q;
+    console.log('Samehadaku search query:', query);
+    
+    const mockResults = [
+      {
+        title: query || 'Sample Anime from Samehadaku',
+        poster: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=450&fit=crop',
+        animeId: 'samehadaku-sample-id',
+        href: '/samehadaku/anime/samehadaku-sample-id/'
+      }
+    ];
+    
+    res.json(mockResults);
+  } catch (error) {
+    console.error('Samehadaku search error:', error);
+    res.status(500).json({
+      statusCode: 500,
+      statusMessage: 'Error',
+      message: 'Samehadaku search failed',
+      ok: false,
+      error: error.message
+    });
+  }
+});
+
+// Catch-all for undefined routes
 app.use('*', (req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     statusCode: 404,
     statusMessage: 'Not Found',
-    message: 'Endpoint not found',
-    ok: false
+    message: `Endpoint not found: ${req.method} ${req.originalUrl}`,
+    ok: false,
+    availableEndpoints: [
+      'GET /health',
+      'GET /',
+      'GET /otakudesu/search?q=query',
+      'GET /otakudesu/anime/:id',
+      'GET /otakudesu/episode/:id',
+      'GET /otakudesu/server/:id',
+      'GET /samehadaku/search?q=query'
+    ]
+  });
+});
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error('Server error:', error);
+  res.status(500).json({
+    statusCode: 500,
+    statusMessage: 'Internal Server Error',
+    message: 'An unexpected error occurred',
+    ok: false,
+    error: error.message
   });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Proxy server running on http://localhost:${PORT}`);
   console.log('📡 Ready to handle anime API requests');
+  console.log('🔍 Available endpoints:');
+  console.log('  - GET /health');
+  console.log('  - GET /otakudesu/search?q=query');
+  console.log('  - GET /otakudesu/anime/:id');
+  console.log('  - GET /otakudesu/episode/:id');
+  console.log('  - GET /otakudesu/server/:id');
 });
