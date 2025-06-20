@@ -1,13 +1,43 @@
-const BASE_URL = 'https://aniyoi-api.vercel.app';
-const PROXY_BASE_URL = 'https://wajik-anime-api-m4e8.onrender.com/anime/';
+const BASE_URL = 'https://wajik-api.onrender.com';
+const PROXY_BASE_URL = 'https://wajik-api.onrender.com';
 
 export async function searchAnime(query: string) {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(query)}`);
-  return res.json();
+  // Sanitize query by removing special characters except letters, numbers, spaces, and common punctuation
+  const sanitizedQuery = query.replace(/[^a-zA-Z0-9\s.,'-]/g, '').trim().replace(/\s+/g, ' ');
+  const res = await fetch(`${BASE_URL}/otakudesu/search?q=${encodeURIComponent(sanitizedQuery)}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch anime search results from wajik-api: ${res.status}`);
+  }
+  const data = await res.json();
+  console.log('wajikApi searchAnime full response:', JSON.stringify(data, null, 2));
+  // Try to find the array of anime in the response
+  let animeList: any[] = [];
+  if (Array.isArray(data)) {
+    animeList = data;
+  } else if (data && typeof data === 'object') {
+    if (Array.isArray(data.animeList)) {
+      animeList = data.animeList;
+    } else if (data.data && typeof data.data === 'object') {
+      // Try to find array inside data.data
+      for (const key in data.data) {
+        if (Array.isArray(data.data[key])) {
+          animeList = data.data[key];
+          break;
+        }
+      }
+    }
+  }
+  if (!Array.isArray(animeList) || animeList.length === 0) {
+    throw new Error('Unexpected response format or empty anime list from wajik-api searchAnime');
+  }
+  return animeList;
 }
 
 export async function getAnimeInfo(id: string) {
-  const res = await fetch(`${BASE_URL}/info/${id}`);
+  const res = await fetch(`${BASE_URL}/otakudesu/anime/${id}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch anime info from wajik-api: ${res.status}`);
+  }
   return res.json();
 }
 

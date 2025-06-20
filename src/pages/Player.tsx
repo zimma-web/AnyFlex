@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Play, Volume2, Maximize, Settings } from 'lucide-react';
 import { Anime } from '../types/anime';
+import { getAnimeInfo, getEpisodeStream, searchAnime } from '../services/wajikApi';
 import { jikanApi } from '../services/jikanApi';
-import { getEpisodeStream } from '../services/wajikApi';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 
 export const Player: React.FC = () => {
@@ -23,16 +23,73 @@ export const Player: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await jikanApi.getAnimeById(parseInt(id));
+
+        // Step 1: Get anime title from MAL ID using jikanApi
+        const malId = parseInt(id, 10);
+        const jikanResponse = await jikanApi.getAnimeById(malId);
+        const animeTitle = jikanResponse.data?.title;
+        if (!animeTitle) {
+          setError('Anime title not found from MAL ID.');
+          setLoading(false);
+          return;
+        }
+
+        // Step 2: Search anime in wajikApi by title
+        const sanitizedTitle = animeTitle.replace(/[()]/g, '').trim().replace(/\s+/g, ' ');
+        console.log('Searching wajikApi with sanitized title:', sanitizedTitle);
+        let wajikSearchResults;
+        try {
+          wajikSearchResults = await searchAnime(sanitizedTitle);
+        } catch (err) {
+          setError(`Failed to fetch anime search results from wajik-api for query: "${sanitizedTitle}"`);
+          setLoading(false);
+          console.error('Error in searchAnime:', err);
+          return;
+        }
+        if (!wajikSearchResults || !Array.isArray(wajikSearchResults) || wajikSearchResults.length === 0) {
+          setError('No matching anime found in wajik-api search.');
+          setLoading(false);
+          return;
+        }
+
+        // Step 3: Find matching anime from search results (try flexible title match, fallback to first)
+        const normalize = (str: string) =>
+          str.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normalizedTitle = normalize(animeTitle);
+        let matchedAnime = wajikSearchResults.find((a: any) =>
+          normalize(a.title).includes(normalizedTitle) || normalizedTitle.includes(normalize(a.title))
+        );
+        if (!matchedAnime) {
+          matchedAnime = wajikSearchResults[0];
+        }
+        if (!matchedAnime || !matchedAnime.animeId) {
+          setError('No valid anime ID found in wajik-api search results.');
+          setLoading(false);
+          return;
+        }
+
+        // Step 4: Get anime info and episodes from wajikApi using matched anime ID
+        const wajikId = matchedAnime.animeId?.toString();
+        if (!wajikId) {
+          setError('No valid anime ID found in wajik-api search results.');
+          setLoading(false);
+          return;
+        }
+        console.log('Fetching anime info with wajikId:', wajikId);
+        const response = await getAnimeInfo(wajikId);
         setAnime(response.data);
-        const episodesResponse = await jikanApi.getAnimeEpisodes(parseInt(id));
-        setEpisodes(episodesResponse.data || []);
-        if (episodesResponse.data && episodesResponse.data.length > 0) {
+        const episodesResponse = Array.isArray(response.data?.episodes) ? response.data.episodes : [];
+        setEpisodes(episodesResponse);
+        if (episodesResponse.length > 0) {
           setSelectedEpisodeIndex(0);
         }
       } catch (err) {
         setError('Failed to fetch anime details. Please try again later.');
         console.error('Error fetching anime details:', err);
+        if (err instanceof Error) {
+          console.error('Error message:', err.message);
+          console.error('Error stack:', err.stack);
+        }
       } finally {
         setLoading(false);
       }
@@ -41,24 +98,14 @@ export const Player: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
-    const fetchVideoUrl = async () => {
+      const fetchVideoUrl = async () => {
       if (episodes.length === 0) return;
       const episode = episodes[selectedEpisodeIndex];
       if (!episode) return;
       try {
         setLoadingVideo(true);
         setError(null);
-        let episodeId = null;
-        if (episode.url) {
-          const parts = episode.url.split('/');
-          episodeId = parts[parts.length - 1];
-        }
-        if (!episodeId && episode.mal_id) {
-          episodeId = episode.mal_id.toString();
-        }
-        if (!episodeId && episode.id) {
-          episodeId = episode.id.toString();
-        }
+        const episodeId = episode.id?.toString() || episode.episodeId?.toString();
         console.log('Fetching video for episodeId:', episodeId);
         if (!episodeId) {
           setError('Episode ID tidak ditemukan untuk streaming.');
@@ -76,6 +123,10 @@ export const Player: React.FC = () => {
       } catch (err) {
         setError('Failed to fetch video stream. Please try again later.');
         console.error('Error fetching video stream:', err);
+        if (err instanceof Error) {
+          console.error('Error message:', err.message);
+          console.error('Error stack:', err.stack);
+        }
         setVideoUrl(null);
       } finally {
         setLoadingVideo(false);
@@ -187,7 +238,7 @@ export const Player: React.FC = () => {
           <div className="mt-6 bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
             <h3 className="text-xl font-bold text-white mb-4">Episode {selectedEpisodeIndex + 1}</h3>
             <p className="text-white/80 leading-relaxed">
-              {anime.synopsis || 'Watch the episode and enjoy the story!'}
+              {typeof anime.synopsis === 'string' ? anime.synopsis : 'Watch the episode and enjoy the story!'}
             </p>
           </div>
         </div>
@@ -220,7 +271,7 @@ export const Player: React.FC = () => {
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
             <h3 className="text-lg font-semibold text-white mb-4">Episodes</h3>
             <div className="space-y-2 max-h-96 overflow-y-auto">
-              {episodes.map((episode, index) => (
+              {Array.isArray(episodes) && episodes.map((episode, index) => (
                 <button
                   key={episode.mal_id || episode.id || index}
                   onClick={() => setSelectedEpisodeIndex(index)}
@@ -243,11 +294,15 @@ export const Player: React.FC = () => {
 
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
             <div className="aspect-[3/4] mb-4">
-              <img
-                src={anime.images.jpg.large_image_url || anime.images.jpg.image_url}
-                alt={anime.title}
-                className="w-full h-full object-cover rounded-lg"
-              />
+            <img
+              src={
+                anime.images?.jpg?.large_image_url ||
+                anime.images?.jpg?.image_url ||
+                'https://via.placeholder.com/300x450?text=No+Image'
+              }
+              alt={anime.title}
+              className="w-full h-full object-cover rounded-lg"
+            />
             </div>
             <h3 className="text-lg font-semibold text-white mb-2">{anime.title}</h3>
             <div className="space-y-2 text-sm">
